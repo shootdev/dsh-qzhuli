@@ -136,10 +136,37 @@ dsh-llm `createUserMessage`/`errorChain`）+ MessageSourceMap 声明合并。
 - **入站 `msg_type`**：服务端只推送文本且实际下发 `msg_type=0`（imnut
   `MsgType_Text=0`；`1` 是 push 侧取值），插件兼容 0/1 均按文本处理。
 
+## 网页端绑定页（可选：扫码可视化）
+
+网关进程之外的 `status-only` 模式 + 浏览器端 tab，让扫码绑定不依赖进程日志：
+
+- **`mode: 'gateway'`（默认）**：完整网关（WS 收消息 + agent 推理 + 推回），如上一节。
+- **`mode: 'status-only'`**：不连 WS、不启用 bridge、不注册工作区，只挂只读 API
+  `GET /api/qzhuli/bind-status`（走 webServer + connection 认证），供浏览器轮询。
+
+浏览器端在 **左侧导航「插件」页**（plugin-manager 的 `plugins.tab` slot）注册
+**Q助理** tab：轮询绑定状态，未绑定时直接展示扫码二维码 + 绑定密钥，已绑定后展示
+会话 ID / 用户 CID / 工作区路径。client bundle 仅 external `react` /
+`react/jsx-runtime`，不 import 任何 Harness 内部模块。
+
+在 web profile（或任意同时挂 webServer 的 profile）里挂载 status-only 条目：
+
+```yaml
+- id: qzhuli-web
+  name: '/Users/you/myProject/dsh-qzhuli/src/index.ts'
+  config:
+    mode: status-only
+    workspacePath: /Users/you/Documents/qzhuli-workspace
+```
+
+浏览器打开 Harness 网页端 → 左侧导航「插件」→ Q助理 tab。重启 web 进程后生效；
+client bundle 有改动时先 `pnpm build:client` 再重启。
+
 ## 配置项
 
 | 字段 | 类型 | 缺省 | 说明 |
 |---|---|---|---|
+| `mode` | `gateway` \| `status-only` | `gateway` | 完整网关 / 只读绑定状态 API |
 | `workspacePath` | string（必填） | — | 会话工作区绝对路径 |
 | `environment` | `release` \| `dev` | `release` | 生产 / 测试域名 |
 | `agentPreset` | string | `default` | 会话 agent 预设名（与宿主 profile 对齐） |
@@ -184,6 +211,7 @@ corepack pnpm gen:paths                           # 生成指向 Harness 源码�
 corepack pnpm typecheck                           # 严格（gateway/config）+ 对 Harness 源码（bridge）
 corepack pnpm test                                # vitest：59 个用例
 corepack pnpm build                               # 仅构建零依赖的 gateway 层到 lib/
+corepack pnpm build:client                        # 构建浏览器端 bundle 到 lib/client.js（改 src/client 后必跑）
 ```
 
 `HARNESS_REPO` 环境变量可覆盖 Harness 仓库路径（默认 `../deepseek-harness`）。

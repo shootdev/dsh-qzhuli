@@ -8,8 +8,9 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { writeFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-credentials'
@@ -28,6 +29,7 @@ import type { BoundSession, InboundMessage } from './gateway/port.ts'
 import { disposeOwnedAgents, ensureAgent, sessionIdForConv } from './bridge/sessions.ts'
 import { currentSeq, readLastAssistantReply } from './bridge/reply.ts'
 import type {} from './bridge/source.ts'
+import QRCode from 'qrcode'
 
 export const name = 'qzhuli'
 
@@ -52,6 +54,12 @@ const ENV_OPENCLAW_TOKEN = 'QZHULI_OPENCLAW_TOKEN'
 
 export function apply(ctx: Context, config: unknown): void {
   const cfg = validateConfig(config)
+
+  // status-only：不启动网关，只向 web 进程暴露绑定状态 API（client 设置页读取）。
+  if ((cfg.mode ?? 'gateway') === 'status-only') {
+    setupStatusOnly(ctx, cfg)
+    return
+  }
 
   let gateway: QzhuliGateway | undefined
 
@@ -196,4 +204,101 @@ async function persistBoundSession(ctx: Context, session: BoundSession): Promise
   } catch (error: unknown) {
     ctx.logger.warn(`qzhuli: persist bound session failed: ${errorChain(error)}`)
   }
+}
+
+/** 绑定状态 API 路径（client 设置页轮询）。 */
+export const BIND_STATUS_PATH = '/api/qzhuli/bind-status'
+
+/** webServer 可选注入：status-only 模式向 web 进程注册只读绑定状态 API。 */
+function setupStatusOnly(ctx: Context, cfg: QzhuliConfig): void {
+  ctx.inject(['webServer', 'connection'], (webCtx) => {
+    const carrier = webCtx as unknown as StatusOnlyContext
+    carrier.effect(
+      () => carrier.webServer.register({
+        kind: 'exact',
+        path: BIND_STATUS_PATH,
+        handler: (req, res) => { void handleBindStatus(carrier, cfg, req, res) },
+      }),
+      `qzhuli: GET ${BIND_STATUS_PATH}`,
+    )
+    ctx.logger.info(`qzhuli: status-only mode — serving ${BIND_STATUS_PATH}`)
+  })
+}
+
+/** ctx.inject(['webServer','connection']) 后 webCtx 的窄类型（宿主源码类型不锁定）。 */
+interface StatusOnlyContext extends Context {
+  webServer: {
+    register(route: {
+      kind: 'exact' | 'prefix'
+      path: string
+      handler(req: IncomingMessage, res: ServerResponse): void | Promise<void>
+    }): () => void
+  }
+}
+
+/** 绑定状态接口响应体。 */
+export interface BindStatusPayload {
+  readonly bound: boolean
+  readonly bindKey?: string
+  readonly convId?: string
+  readonly senderCid?: string
+  /** 未绑定时：扫码绑定二维码 PNG dataURL（imnut_bind 负载）。 */
+  readonly qrcodeDataUrl?: string
+  readonly workspacePath: string
+}
+
+async function handleBindStatus(ctx: Context, cfg: QzhuliConfig, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const connection = Reflect.get(ctx, 'connection') as
+    | { requestRejection(request: { readonly headers: IncomingMessage['headers'] }): 401 | 403 | undefined }
+    | undefined
+  const rejection = connection?.requestRejection?.(req)
+  if (rejection !== undefined) {
+    res.statusCode = rejection
+    res.end()
+    return
+  }
+  try {
+    const body = await buildStatusPayload(ctx, cfg)
+    sendJson(res, 200, body)
+  } catch (error: unknown) {
+    ctx.logger.warn(`qzhuli: bind-status failed: ${errorChain(error)}`)
+    sendJson(res, 500, { error: errorChain(error) })
+  }
+}
+
+/** 组装绑定状态：bound（凭据直连）+ bindKey（自动生成/持久化）+ 未绑定二维码。 */
+async function buildStatusPayload(ctx: Context, cfg: QzhuliConfig): Promise<BindStatusPayload> {
+  const bound = await resolveBoundSession(ctx)
+  const bindKey = await resolveBindKey(ctx, cfg)
+  // 可变中间态：构造完成后整体作为 readonly BindStatusPayload 返回。
+  const payload: {
+    bound: boolean
+    bindKey?: string
+    convId?: string
+    senderCid?: string
+    qrcodeDataUrl?: string
+    workspacePath: string
+  } = { bound: bound !== undefined, bindKey, workspacePath: cfg.workspacePath }
+  if (bound) {
+    payload.convId = bound.convId
+    payload.senderCid = bound.senderCid
+    return payload
+  }
+  // 未绑定：优先读网关进程写入的负载文件，否则按同协议现场构造。
+  const payloadText = JSON.stringify({ type: 'imnut_bind', key: bindKey, id: 2 })
+  let bindPayload = payloadText
+  try {
+    const file = await readFile(join(cfg.workspacePath, 'bind-qrcode.txt'), 'utf8')
+    const line = file.trim()
+    if (line) bindPayload = line
+  } catch {
+    // 网关进程未运行/未写文件：用现场构造的负载，语义一致。
+  }
+  payload.qrcodeDataUrl = await QRCode.toDataURL(bindPayload, { width: 320, margin: 1 })
+  return payload
+}
+
+function sendJson(res: ServerResponse, status: number, body: unknown): void {
+  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
+  res.end(JSON.stringify(body))
 }

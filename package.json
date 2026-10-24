@@ -10,11 +10,22 @@
       "types": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./client": {
+      "default": "./lib/client.js"
+    },
     "./gateway": {
       "types": "./lib/types/gateway/index.d.ts",
       "default": "./lib/gateway/index.js"
     },
     "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "slots"
+      ],
+      "platform": "web"
+    }
   },
   "files": [
     "lib",
@@ -30,6 +41,7 @@
     "gen:paths": "node scripts/gen-tsconfig-paths.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.dev.json --noEmit",
     "build": "tsc -p tsconfig.json",
+    "build:client": "tsdown",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -48,8 +60,15 @@
     "@deepseek-ai/dsh-session-title": ">=0.2.0",
     "@deepseek-ai/dsh-workspace": ">=0.2.0"
   },
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "^18.2.0",
+    "react": "^18.2.0",
+    "tsdown": "^0.22.2",
     "typescript": "^6.0.3",
     "vitest": "^3.0.0"
   }

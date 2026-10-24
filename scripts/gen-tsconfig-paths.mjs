@@ -112,7 +112,9 @@ const tsconfigDev = {
     noUnusedParameters: false,
     paths: absPaths,
   },
-  include: ['src', 'tests'],
+  // src/client 不做严格类型检查（其 slots/React 类型来自宿主源码，独立仓库
+  // 不锁定宿主版本）；client 代码的正确性由 tsdown 产物 + 浏览器实证保证。
+  include: ['src/gateway', 'src/bridge', 'src/config.ts', 'src/index.ts', 'tests'],
 }
 writeFileSync(join(here, '../tsconfig.dev.json'), JSON.stringify(tsconfigDev, null, 2) + '\n')
 

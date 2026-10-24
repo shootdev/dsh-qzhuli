@@ -14,6 +14,9 @@ export interface QzhuliModelConfig {
 export interface QzhuliConfig {
   /** release = 生产，dev = 测试。缺省 release。 */
   readonly environment?: 'release' | 'dev'
+  /** 运行模式：gateway = 完整网关（连 WS 收消息 + agent 推理 + 推回）；
+   * status-only = 只读绑定状态（供 web profile 的 client 设置页展示），不连 WS。 */
+  readonly mode?: 'gateway' | 'status-only'
   /** 会话工作区绝对路径（必填）。
    * 建议与宿主默认工作区放在同一目录（如 macOS `~/Documents/` 下），
    * 与默认工作区同级、勿直接建在用户主目录根：会话目录与凭据按 workspace
@@ -39,6 +42,7 @@ export const QZHULI_DEFAULTS = {
   agentPreset: 'default',
   permissionPreset: 'default',
   maxMessageLength: 2000,
+  mode: 'gateway',
 } as const
 
 /** 校验并归一化配置；非法输入抛 TypeError（插件加载即失败，符合 fail-loud 约定）。 */
@@ -61,6 +65,11 @@ export function validateConfig(input: unknown): QzhuliConfig {
     throw new TypeError(`qzhuli config environment must be 'release' or 'dev', got ${JSON.stringify(environment)}`)
   }
 
+  const mode = record.mode
+  if (mode !== undefined && mode !== 'gateway' && mode !== 'status-only') {
+    throw new TypeError(`qzhuli config mode must be 'gateway' or 'status-only', got ${JSON.stringify(mode)}`)
+  }
+
   const maxMessageLength = record.maxMessageLength
   if (
     maxMessageLength !== undefined &&
@@ -81,6 +90,7 @@ export function validateConfig(input: unknown): QzhuliConfig {
 
   let cfg: QzhuliConfig = { workspacePath }
   if (environment !== undefined) cfg = { ...cfg, environment }
+  if (mode !== undefined) cfg = { ...cfg, mode }
   if (typeof record.agentPreset === 'string' && record.agentPreset.trim() !== '') {
     cfg = { ...cfg, agentPreset: record.agentPreset.trim() }
   }
