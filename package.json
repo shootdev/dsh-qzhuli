@@ -3,20 +3,20 @@
   "version": "0.1.0",
   "description": "Q助理（QZhuli）网关插件 for DeepSeek Harness：把 Q助理手机/电脑端会话接入 Harness Agent（imnut 协议，扫码绑定 + WebSocket 收消息 + HTTP 推消息）",
   "type": "module",
-  "main": "src/index.ts",
-  "types": "src/index.ts",
+  "main": "./lib/index.mjs",
+  "types": "./lib/index.d.mts",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
+      "types": "./lib/index.d.mts",
+      "default": "./lib/index.mjs"
     },
     "./client": {
       "default": "./lib/client.js"
     },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./gateway": {
-      "types": "./lib/types/gateway/index.d.ts",
-      "default": "./lib/gateway/index.js"
+      "types": "./lib/gateway/index.d.mts",
+      "default": "./lib/gateway/index.mjs"
     },
     "./package.json": "./package.json"
   },
@@ -45,7 +45,7 @@
   "scripts": {
     "gen:paths": "node scripts/gen-tsconfig-paths.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.dev.json --noEmit",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsdown -c tsdown.index.config.ts",
     "build:client": "tsdown",
     "test": "vitest run",
     "test:watch": "vitest"

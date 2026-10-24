@@ -278,7 +278,11 @@ async function buildStatusPayload(ctx: Context, cfg: QzhuliConfig): Promise<Bind
     senderCid?: string
     qrcodeDataUrl?: string
     workspacePath: string
-  } = { bound: bound !== undefined, bindKey, workspacePath: cfg.workspacePath }
+  } = {
+    bound: bound !== undefined,
+    ...(bindKey === undefined ? {} : { bindKey }),
+    workspacePath: cfg.workspacePath,
+  }
   if (bound) {
     payload.convId = bound.convId
     payload.senderCid = bound.senderCid
