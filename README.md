@@ -125,6 +125,24 @@ dsh-llm `createUserMessage`/`errorChain`）+ MessageSourceMap 声明合并。
 路径一旦迁移，历史会话需一并迁移（改名 sessions 目录会导致 header cwd 校验失败，
 只能弃旧重建）。
 
+**与网页端（web 进程）的会话锁隔离（必须配置）**：Harness 对同一会话使用
+跨进程单写锁（`session.lock` flock，`session-persistence-jsonl` 的 lease 机制）。
+web 进程启动会自动恢复其会话目录下的会话并持有写锁；若网关与 web 共用同一
+`~/.dsh/sessions`，web 端会把 Q助理会话锁住，网关 `resume`/`create` 拿不到写
+所有权 → 消息进得来、agent 回合起不来、无回复。**网关 profile 必须把
+`session-persistence-jsonl` 的 `root` 覆盖为独立目录**（如 `~/.dsh-qzhuli/sessions`），
+与 web 端物理隔离，两端可同时运行：
+
+```yaml
+- id: session-persistence-jsonl
+  name: '@deepseek-ai/dsh-session-persistence-jsonl'
+  config:
+    root: /Users/you/.dsh-qzhuli/sessions   # 网关专属会话目录，勿与 ~/.dsh/sessions 共用
+```
+
+已有会话迁入新 root 后，删除旧 `session.lock`（web 端 fd 锁的是旧 inode，
+删除后孤儿锁失效，网关下次 open 会拿到全新 inode 的锁）。
+
 接入实测要点：
 
 - **system-prompt 是必配项**：空 `personaPrefix` 时 agent 回合卡死，症状是消息收到、
