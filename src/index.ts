@@ -7,6 +7,9 @@
  * 其余均为类型级依赖（声明合并/仅类型）。
  */
 
+import { randomUUID } from 'node:crypto'
+import { writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-credentials'
@@ -41,6 +44,7 @@ export const inject = [
 ] as const
 
 /** 绑定/密钥相关环境变量名（经 Harness credentials 子系统解析）。 */
+const ENV_BIND_KEY = 'QZHULI_BIND_KEY'
 const ENV_SENDER_CID = 'QZHULI_SENDER_CID'
 const ENV_CONV_ID = 'QZHULI_CONV_ID'
 const ENV_WS_TOKEN = 'QZHULI_WS_TOKEN'
@@ -49,32 +53,61 @@ const ENV_OPENCLAW_TOKEN = 'QZHULI_OPENCLAW_TOKEN'
 export function apply(ctx: Context, config: unknown): void {
   const cfg = validateConfig(config)
 
-  const gateway = new QzhuliGateway({
-    environment: cfg.environment ?? 'release',
-    ...(cfg.bindKey ? { bindKey: cfg.bindKey } : {}),
-    resolveSession: () => resolveBoundSession(ctx),
-    resolveOpenClawToken: async () => (await ctx.credentials.resolve(credentialRef(ENV_OPENCLAW_TOKEN)))?.value,
-    onStatus: (status) => {
-      ctx.logger.info(
-        `qzhuli: bind=${status.bindStatus} connected=${status.connected}${status.error ? ` error=${status.error}` : ''}`,
-      )
-    },
-  })
-  gateway.onBound((session) => {
-    void persistBoundSession(ctx, session)
-  })
-  gateway.onInbound((msg) => {
-    enqueue(ctx, gateway, cfg, msg)
-  })
+  let gateway: QzhuliGateway | undefined
 
   ctx.effect(() => async () => {
-    await gateway.stop()
+    await gateway?.stop()
     await disposeOwnedAgents()
   })
 
-  void gateway.start().catch((error: unknown) => {
+  void (async () => {
+    const bindKey = await resolveBindKey(ctx, cfg)
+    gateway = new QzhuliGateway({
+      environment: cfg.environment ?? 'release',
+      ...(bindKey ? { bindKey } : {}),
+      resolveSession: () => resolveBoundSession(ctx),
+      resolveOpenClawToken: async () => (await ctx.credentials.resolve(credentialRef(ENV_OPENCLAW_TOKEN)))?.value,
+      onStatus: (status) => {
+        ctx.logger.info(
+          `qzhuli: bind=${status.bindStatus} connected=${status.connected}${status.error ? ` error=${status.error}` : ''}`,
+        )
+      },
+    })
+    gateway.onBound((session) => {
+      void persistBoundSession(ctx, session)
+    })
+    gateway.onInbound((msg) => {
+      enqueue(ctx, gateway as QzhuliGateway, cfg, msg)
+    })
+    if (bindKey && !(await resolveBoundSession(ctx))) {
+      await exposeBindQrCode(ctx, cfg, bindKey)
+    }
+    await gateway.start()
+  })().catch((error: unknown) => {
     ctx.logger.error(`qzhuli: gateway start failed: ${errorChain(error)}`)
   })
+}
+
+/** 解析绑定密钥：显式配置 → credentials 持久值 → 自动生成并持久化（重启后不变）。 */
+async function resolveBindKey(ctx: Context, cfg: QzhuliConfig): Promise<string | undefined> {
+  if (cfg.bindKey) return cfg.bindKey
+  const existing = await ctx.credentials.resolve(credentialRef(ENV_BIND_KEY))
+  if (existing) return existing.value
+  const generated = randomUUID()
+  await ctx.credentials.set(credentialRef(ENV_BIND_KEY), generated)
+  ctx.logger.info('qzhuli: generated bind key and persisted (QZHULI_BIND_KEY)')
+  return generated
+}
+
+/** 把扫码绑定负载写入工作区并打日志（与 Hermes 协议一致：{"type":"imnut_bind","key":...,"id":2}）。 */
+async function exposeBindQrCode(ctx: Context, cfg: QzhuliConfig, bindKey: string): Promise<void> {
+  const payload = JSON.stringify({ type: 'imnut_bind', key: bindKey, id: 2 })
+  try {
+    await writeFile(join(cfg.workspacePath, 'bind-qrcode.txt'), `${payload}\n`, 'utf8')
+  } catch (error: unknown) {
+    ctx.logger.warn(`qzhuli: write bind-qrcode.txt failed: ${errorChain(error)}`)
+  }
+  ctx.logger.info(`qzhuli: 请用手机 Q助理 App 扫码绑定 → ${payload}`)
 }
 
 /** 每会话串行队列：避免 followup 回合交错。 */
