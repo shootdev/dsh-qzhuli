@@ -41,15 +41,16 @@ dsh-llm `createUserMessage`/`errorChain`）+ MessageSourceMap 声明合并。
   config:
     workspacePath: /Users/you/qzhuli-workspace   # 会话工作区，必填
     environment: release                          # release / dev，缺省 release
-    agentPreset: default                          # 缺省 default
+    agentPreset: standard                         # 缺省 default
     permissionPreset: default                     # 缺省 default
     allowedUsers: [sender_cid_1]                  # 可选：sender_cid 白名单
-    bindKey: 你的绑定密钥                          # 首次接入：无凭据时触发扫码绑定
 ```
 
-首次启动：无已绑定凭据 + 有 `bindKey` → 网关进入 `pending`，在手机 Q助理 App 上完成扫码；
-绑定成功后凭据自动写入 Harness credentials（`QZHULI_SENDER_CID` / `QZHULI_CONV_ID` / `QZHULI_WS_TOKEN`），
-重启后免扫码直连。
+首次启动：无已绑定凭据时插件**自动生成** `bindKey`（显式配置 `bindKey` > credentials
+`QZHULI_BIND_KEY` > 自动生成 UUID）并持久化，把扫码负载
+`{"type":"imnut_bind","key":...,"id":2}` 写入 `<workspacePath>/bind-qrcode.txt`、
+打印到插件日志；在手机 Q助理 App 上完成扫码后，凭据自动写入 Harness credentials
+（`QZHULI_SENDER_CID` / `QZHULI_CONV_ID` / `QZHULI_WS_TOKEN`），重启后免扫码直连。
 
 已绑定直连（或想用环境变量覆盖绑定状态）时，以下凭据经 Harness credentials 子系统解析：
 
@@ -59,6 +60,76 @@ dsh-llm `createUserMessage`/`errorChain`）+ MessageSourceMap 声明合并。
 | `QZHULI_CONV_ID` | 绑定会话 id（必填，直连时） |
 | `QZHULI_WS_TOKEN` | WS 绑定 token（必填，直连时） |
 | `QZHULI_OPENCLAW_TOKEN` | 可选：WS subprotocol `X-OpenClaw-Token.<value>` |
+
+### Harness profile 配置要求（实测，base-only profile）
+
+插件可以跑在只挂 `@deepseek-ai/dsh-base` 的 profile 上，但 base 不提供 agent
+装配与系统提示，**必须**在 profile patch 里补齐（否则消息进得来、agent 回合不启动）：
+
+```yaml
+# bundles: ["@deepseek-ai/dsh-base"]
+- insert:
+    # base 之上显式补 agent 预设：registry + 一个 preset（plugins 可为空，随宿主能力跑）
+    - id: agent-preset-registry
+      name: '@deepseek-ai/dsh-agent-preset-registry'
+      config:
+        default: standard
+    - id: preset-standard
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: standard
+        order: 1
+        plugins: []
+    - id: workspace
+      name: '@deepseek-ai/dsh-workspace'
+
+    # 【关键】base 的 system-prompt 默认 personaPrefix 为空，agent 没有系统提示
+    # 回合不会启动（followup 挂起、无 LLM 调用）。与 headless/web 一致显式给出：
+    - id: system-prompt
+      name: '@deepseek-ai/dsh-system-prompt'
+      config:
+        personaPrefix: >-
+          You are a coding agent powered by the {{model}} model.
+
+    # LLM：复用 web profile 的火山引擎 provider（凭据走全局 credentials refs，
+    # 无需在 profile 里写密钥）
+    - id: llm-pi-ai
+      name: '@deepseek-ai/dsh-llm-pi-ai'
+      config:
+        providers:
+          volcengine:
+            displayName: 火山引擎
+            apiKeyEnv: VOLCENGINE_API_KEY
+            api: openai-completions
+            baseURL: https://ark.cn-beijing.volces.com/api/coding/v3
+            models:
+              - id: deepseek-v4-1-flash-261017
+                name: deepseek-v4-1-flash
+    - id: agent-default-model
+      name: '@deepseek-ai/dsh-agent-default-model'
+      config:
+        provider: volcengine
+        model: deepseek-v4-1-flash-261017
+
+    # 插件本身
+    - id: qzhuli
+      name: '/Users/you/myProject/dsh-qzhuli/src/index.ts'
+      config:
+        workspacePath: /Users/you/qzhuli-workspace
+        environment: release
+        agentPreset: standard
+```
+
+接入实测要点：
+
+- **system-prompt 是必配项**：空 `personaPrefix` 时 agent 回合卡死，症状是消息收到、
+  会话创建、但无 LLM 调用、无回复。
+- **火山引擎密钥**：`VOLCENGINE_API_KEY` 放在全局 `~/.dsh/.credentials.yaml` 的
+  `refs`，profile 只声明 `apiKeyEnv`，多 profile 共用一份密钥。
+- **绑定凭据持久化**：扫码后三个 `QZHULI_*` 键写入同一 credentials 文件，
+  与 `VOLCENGINE_API_KEY` 并存；重启免扫码。
+- **入站 `msg_type`**：服务端只推送文本且实际下发 `msg_type=0`（imnut
+  `MsgType_Text=0`；`1` 是 push 侧取值），插件兼容 0/1 均按文本处理。
 
 ## 配置项
 
@@ -72,7 +143,7 @@ dsh-llm `createUserMessage`/`errorChain`）+ MessageSourceMap 声明合并。
 | `allowedUsers` | string[] | 无 | sender_cid 白名单；缺省仅处理绑定会话 |
 | `model` | `{provider, model, maxTokens?}` | 缺省取 `agentDefaultModel` | 显式模型路由 |
 | `maxMessageLength` | number | `2000` | 入站消息截断长度 |
-| `bindKey` | string | 无 | 无凭据时启用扫码绑定 |
+| `bindKey` | string | 无 | 显式绑定密钥；缺省自动生成 UUID 并持久化到 credentials |
 
 ## 行为语义
 
@@ -81,7 +152,8 @@ dsh-llm `createUserMessage`/`errorChain`）+ MessageSourceMap 声明合并。
 - **每会话串行队列**：同一 conv 的消息按到达顺序排队处理，避免 followup 回合交错。
 - **回复读取**：回合开始前记 `sessionQuery.listEvents` 游标，`agent.whenIdle()` 结束后增量读
   最后一个 `assistant/message`，渲染 text 块推回；不维护自己的历史状态（会话日志即唯一事实源）。
-- **入站过滤**：非文本消息忽略；非绑定 conv 消息忽略（v1 单绑定会话）；白名单外 sender 忽略。
+- **入站过滤**：非文本消息忽略（服务端只推文本，`msg_type` 0/1 均视为文本）；非绑定 conv
+  消息忽略（v1 单绑定会话）；白名单外 sender 忽略。
 - **凭据热更新**：每次连接/重连现解析 credentials，改环境变量无需重启插件。
 
 ## 独立性设计（核心诉求）
