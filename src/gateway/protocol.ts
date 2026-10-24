@@ -35,8 +35,10 @@ export const PROTOCOL = {
   /** WS 断线重连指数退避区间（2s → 30s）。 */
   reconnectMinMs: 2_000,
   reconnectMaxMs: 30_000,
-  /** 心跳间隔。 */
+  /** 心跳间隔：每 30s 发一次 `{"type":"ping","ts":...}`，服务端回 pong。 */
   heartbeatIntervalMs: 30_000,
+  /** 半开检测：超过心跳间隔的该倍数未收到任何服务端帧，强制重连。 */
+  staleHeartbeatMultiplier: 3,
 } as const
 
 /** 归一化环境名；未知值回落 release。 */

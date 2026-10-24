@@ -170,6 +170,53 @@ describe('ws: WsClient', () => {
     client.stop()
   })
 
+  it('半开连接（服务端不再回任何帧）→ 心跳超时强制 close 并重连', async () => {
+    const onDisconnected = vi.fn()
+    const client = new WsClient(
+      {
+        url: 'wss://x/wss_openclaw',
+        heartbeatIntervalMs: 10,
+        staleHeartbeatMultiplier: 2,
+        reconnectMinMs: 5,
+        WebSocketImpl: mockWebSocketCtor,
+      },
+      { onMessage: () => {}, onConnected: () => {}, onDisconnected, onError: () => {} },
+    )
+    client.start()
+    const ws = lastInstance()
+    ws.open()
+    // 不发任何服务端帧：仅心跳间隔 * multiplier 后应检测到半开并强制 close
+    await sleep(60)
+    expect(ws.readyState).toBe(MockWebSocket.CLOSED)
+    expect(onDisconnected).toHaveBeenCalled()
+    await sleep(15)
+    expect(MockWebSocket.instances.length).toBe(2)
+    client.stop()
+  })
+
+  it('服务端持续回帧 → 不触发半开强制关闭', async () => {
+    const client = new WsClient(
+      {
+        url: 'wss://x/wss_openclaw',
+        heartbeatIntervalMs: 10,
+        staleHeartbeatMultiplier: 2,
+        reconnectMinMs: 5,
+        WebSocketImpl: mockWebSocketCtor,
+      },
+      { onMessage: () => {}, onConnected: () => {}, onDisconnected: () => {}, onError: () => {} },
+    )
+    client.start()
+    const ws = lastInstance()
+    ws.open()
+    // 每 10ms 收到一帧 pong，保持连接活跃
+    const timer = setInterval(() => ws.receive('{"type":"pong"}'), 8)
+    await sleep(80)
+    clearInterval(timer)
+    expect(ws.readyState).toBe(MockWebSocket.OPEN)
+    expect(MockWebSocket.instances.length).toBe(1)
+    client.stop()
+  })
+
   it('openClawToken → WS subprotocol', () => {
     const client = new WsClient(
       { url: 'wss://x/wss_openclaw', openClawToken: 'tok1', WebSocketImpl: mockWebSocketCtor },

@@ -13,6 +13,8 @@ export interface WsClientOptions {
   readonly heartbeatIntervalMs?: number
   readonly reconnectMinMs?: number
   readonly reconnectMaxMs?: number
+  /** 半开检测：心跳间隔倍数，超过该倍数未收到任何服务端帧则强制重连。 */
+  readonly staleHeartbeatMultiplier?: number
   /** 可注入 WebSocket 实现（测试用）。 */
   readonly WebSocketImpl?: typeof WebSocket
 }
@@ -89,6 +91,8 @@ export class WsClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined
   private reconnectDelay: number
   private closed = false
+  /** 最近一次收到服务端帧的时间（半开检测基准）。 */
+  private lastActivityAt = 0
 
   constructor(options: WsClientOptions, events: WsClientEvents) {
     this.options = options
@@ -137,10 +141,12 @@ export class WsClient {
     this.ws = ws
     ws.addEventListener('open', () => {
       this.reconnectDelay = this.options.reconnectMinMs ?? PROTOCOL.reconnectMinMs
+      this.lastActivityAt = Date.now()
       this.events.onConnected()
       this.startHeartbeat()
     })
     ws.addEventListener('message', (event: MessageEvent) => {
+      this.lastActivityAt = Date.now()
       void this.handleData(event.data)
     })
     ws.addEventListener('close', () => {
@@ -184,10 +190,28 @@ export class WsClient {
     this.heartbeatTimer = setInterval(() => {
       const ws = this.ws
       if (!ws || ws.readyState !== WS_OPEN) return
+      const staleAfter = (this.options.staleHeartbeatMultiplier ?? PROTOCOL.staleHeartbeatMultiplier) * interval
+      if (this.lastActivityAt > 0 && Date.now() - this.lastActivityAt > staleAfter) {
+        // 半开连接：服务端超过 staleAfter 未回任何帧（心跳无应答），
+        // 强制断开以触发 close → 指数退避重连；否则消息会永远静默丢失。
+        this.stopHeartbeat()
+        try {
+          ws.close(4001, 'stale connection: no frames')
+        } catch {
+          // 关闭异常忽略，close 事件仍会触发重连
+        }
+        return
+      }
       try {
         ws.send(heartbeatFrame())
       } catch {
+        // 发送失败说明底层连接已不可用，断开触发重连
         this.stopHeartbeat()
+        try {
+          ws.close(4001, 'heartbeat send failed')
+        } catch {
+          // 关闭异常忽略，close 事件仍会触发重连
+        }
       }
     }, interval)
   }
