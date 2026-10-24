@@ -132,7 +132,9 @@ async function processMessage(
   cfg: QzhuliConfig,
   msg: InboundMessage,
 ): Promise<void> {
-  if (msg.msgType !== 1) {
+  // 服务端只推送文本消息（imnut 端已按 MsgType_Text 过滤），且实际下发 msg_type=0；
+  // 兼容 LobsterAI 语义（push 用 1）——0 与 1 都视为文本处理。
+  if (msg.msgType !== 0 && msg.msgType !== 1) {
     ctx.logger.info(`qzhuli: ignore non-text message msg_type=${msg.msgType} conv=${msg.convId}`)
     return
   }
