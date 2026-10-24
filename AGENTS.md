@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Q助理网关插件（qzhuli-deepseekharness-plugin）—— 把 Q助理会话接入 DeepSeek Harness。
+Q助理网关插件（dsh-qzhuli）—— 把 Q助理会话接入 DeepSeek Harness。
 
 ## 分层铁律（独立性是核心诉求）
 

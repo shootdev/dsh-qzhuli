@@ -1,5 +1,5 @@
 {
-  "name": "qzhuli-deepseekharness-plugin",
+  "name": "dsh-qzhuli",
   "version": "0.1.0",
   "description": "Q助理（QZhuli）网关插件 for DeepSeek Harness：把 Q助理手机/电脑端会话接入 Harness Agent（imnut 协议，扫码绑定 + WebSocket 收消息 + HTTP 推消息）",
   "type": "module",

@@ -1,4 +1,4 @@
-# qzhuli-deepseekharness-plugin
+# dsh-qzhuli
 
 Q助理（QZhuli）网关插件 for DeepSeek Harness —— 把 Q助理手机/电脑端会话接入 Harness Agent：
 扫码绑定 → WebSocket 收消息 → 推入 Agent 回合 → 增量读取回复 → HTTP 推回 Q助理。
@@ -37,7 +37,7 @@ dsh-llm `createUserMessage`/`errorChain`）+ MessageSourceMap 声明合并。
 
 ```yaml
 # cordis.patch.yml 或 profile 目录下的 patch 文件
-- name: '/Users/you/myProject/qzhuli-deepseekharness-plugin/src/index.ts'
+- name: '/Users/you/myProject/dsh-qzhuli/src/index.ts'
   config:
     workspacePath: /Users/you/qzhuli-workspace   # 会话工作区，必填
     environment: release                          # release / dev，缺省 release
