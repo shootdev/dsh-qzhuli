@@ -1,0 +1,80 @@
+# dsh-qzhuli 网关插件组合包配置层
+#
+# 依赖 base bundle（agent / session / llm / shell 等服务来自 base）；
+# 本层只声明插件自身与其运行必需配置，全部提供默认值，profile 可覆盖
+# （last write wins，profile cordis.patch.yml 晚于 bundle patch 应用）。
+#
+# 会话存储 root 不在此覆盖：与 web 进程的锁隔离取决于“哪个 profile 应用本
+# bundle”，属于 profile 层职责。网关 profile 需自行覆盖
+# session-persistence-jsonl root（如 `~/.dsh/qzhuli-sessions`），避免与 web
+# 端争抢同一会话目录的单写锁（见 README「会话锁隔离」）。
+
+- insert:
+    # agentPreset 与 workspace 服务：base 不挂载这两者（web-app 才挂），
+    # 网关 profile 只有 base，这里显式补齐：registry（default: standard）
+    # + 一个最小 preset 定义（空 plugins，只随宿主能力跑）+ workspace 服务。
+    - id: agent-preset-registry
+      name: '@deepseek-ai/dsh-agent-preset-registry'
+      config:
+        default: standard
+
+    - id: preset-standard
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: standard
+        order: 1
+        plugins: []
+
+    - id: workspace
+      name: '@deepseek-ai/dsh-workspace'
+
+    # LLM 提供方（火山引擎）：apiKeyEnv 引用全局 credentials refs
+    # （VOLCENGINE_API_KEY，见 README「复用火山引擎配置」）。
+    - id: llm-pi-ai
+      name: '@deepseek-ai/dsh-llm-pi-ai'
+      config:
+        providers:
+          volcengine:
+            displayName: 火山引擎
+            apiKeyEnv: VOLCENGINE_API_KEY
+            api: openai-completions
+            baseURL: https://ark.cn-beijing.volces.com/api/coding/v3
+            models:
+              - id: doubao-seed-2-1-lite-260915
+                name: doubao-seed-2-1-lite
+              - id: glm-5-3-flash-260828
+                name: glm-5-3-flash
+              - id: deepseek-v4-1-flash-260910
+                name: deepseek-v4-1-flash
+              - id: doubao-seed-2-1-pro-260915
+                name: doubao-seed-2-1-pro
+              - id: doubao-seedream-5-0-flash-260915
+                name: doubao-seedream-5-0-flash
+              - id: deepseek-v4-1-flash-261017
+                name: deepseek-v4-1-flash
+              - id: deepseek-v4-1-flash-economy-261017
+                name: deepseek-v4-1-flash-economy
+
+    - id: agent-default-model
+      name: '@deepseek-ai/dsh-agent-default-model'
+      config:
+        provider: volcengine
+        model: deepseek-v4-1-flash-261017
+
+    # base 默认 personaPrefix 为空，agent 无系统提示无法启动回合；
+    # 与 headless bundle 一致，显式给出系统提示。
+    - id: system-prompt
+      name: '@deepseek-ai/dsh-system-prompt'
+      config:
+        personaPrefix: >-
+          You are a coding agent powered by the {{model}} model.
+
+    # 插件本体：默认工作区放用户主目录下；网关 profile 可按偏好覆盖
+    #（如放宿主项目目录内，见 README「workspacePath 位置」）。
+    - id: qzhuli
+      name: 'dsh-qzhuli'
+      config:
+        workspacePath: !!js "process.env.HOME + '/qzhuli-workspace'"
+        environment: release
+        agentPreset: standard
+        permissionPreset: workspace-write
