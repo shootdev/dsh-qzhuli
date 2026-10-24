@@ -24,7 +24,7 @@ export interface QzhuliConfig {
   readonly workspacePath: string
   /** 会话 agent 预设名。缺省 'default'（需与宿主 profile 对齐）。 */
   readonly agentPreset?: string
-  /** 会话权限预设名。缺省 'default'。 */
+  /** 会话权限预设名。缺省 'workspace-write'（base bundle 提供 read-only / workspace-write / danger-full-access；'default' 不存在，会抛 unknown preset）。 */
   readonly permissionPreset?: string
   /** 会话标题。缺省「Q助理 <conv_id>」。 */
   readonly title?: string
@@ -40,7 +40,7 @@ export interface QzhuliConfig {
 
 export const QZHULI_DEFAULTS = {
   agentPreset: 'default',
-  permissionPreset: 'default',
+  permissionPreset: 'workspace-write',
   maxMessageLength: 2000,
   mode: 'gateway',
 } as const

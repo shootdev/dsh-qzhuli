@@ -128,7 +128,7 @@ describe('sessions: ensureAgent', () => {
     expect(handles[0]?.agent).toBe(agent)
     expect(workspaces.length).toBe(1)
     expect(workspaces[0]?.attachSession).toHaveBeenCalledWith('qzhuli:c1')
-    expect(ctx.permissionPresets.set).toHaveBeenCalledWith(agent.session, 'default')
+    expect(ctx.permissionPresets.set).toHaveBeenCalledWith(agent.session, 'workspace-write')
     expect(ctx.sessionTitle.rename).toHaveBeenCalledWith(agent.session, 'Q助理 c1')
     expect(ctx.agents.create).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: 'qzhuli:c1', meta: { cwd: '/tmp/qzhuli-workspace', agentPreset: 'default' } }),

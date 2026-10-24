@@ -40,7 +40,7 @@ export async function ensureAgent(ctx: Context, convId: string, cfg: QzhuliConfi
   if (live) return live
 
   const presetName = cfg.agentPreset ?? 'default'
-  const permissionPreset = cfg.permissionPreset ?? 'default'
+  const permissionPreset = cfg.permissionPreset ?? 'workspace-write'
   const preset = await ctx.agentPresets.resolve(presetName)
   await using presetScope = await ctx.agentPresets.acquireScope(preset.id)
   void presetScope
@@ -87,7 +87,6 @@ async function createAgent(
   let attached = false
   try {
     await workspace.attachSession(sessionId)
-    attached = true
     ctx.permissionPresets.set(handle.agent.session, permissionPreset)
     ctx.sessionTitle.rename(handle.agent.session, cfg.title ?? `Q助理 ${convId}`)
   } catch (error) {

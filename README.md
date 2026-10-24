@@ -120,10 +120,11 @@ dsh-llm `createUserMessage`/`errorChain`）+ MessageSourceMap 声明合并。
         agentPreset: standard
 ```
 
-**workspacePath 位置**：与宿主默认工作区放同一目录（macOS 上如
-`~/Documents/`），不要直接建在用户主目录根。会话目录名按 workspace 路径派生，
-路径一旦迁移，历史会话需一并迁移（改名 sessions 目录会导致 header cwd 校验失败，
-只能弃旧重建）。
+**workspacePath 位置**：按偏好放置——可放宿主项目目录内（如
+`~/myProject/<host-project>/qzhuli-workspace`）或 `~/Documents/` 下，勿直接建在
+用户主目录根。会话目录名按 workspace 路径派生，路径一旦迁移，历史会话需一并
+迁移（改名 sessions 目录会导致 header cwd 校验失败，只能弃旧重建）。注意：
+放在宿主项目仓库内时，agent 会把该仓库当作工作项目（AGENTS.md 等会注入会话上下文）。
 
 **与网页端（web 进程）的会话锁隔离（必须配置）**：Harness 对同一会话使用
 跨进程单写锁（`session.lock` flock，`session-persistence-jsonl` 的 lease 机制）。
@@ -147,6 +148,10 @@ web 进程启动会自动恢复其会话目录下的会话并持有写锁；若�
 
 - **system-prompt 是必配项**：空 `personaPrefix` 时 agent 回合卡死，症状是消息收到、
   会话创建、但无 LLM 调用、无回复。
+- **permissionPreset 默认 `workspace-write`**：base bundle 只提供 `read-only` /
+  `workspace-write` / `danger-full-access`，`'default'` 不存在——设成它会在
+  create 会话时抛 `unknown preset "default"`，症状是消息进来、会话只有 header、
+  回合不启动（resume 旧会话可绕过，但首次消息必现）。
 - **火山引擎密钥**：`VOLCENGINE_API_KEY` 放在全局 `~/.dsh/.credentials.yaml` 的
   `refs`，profile 只声明 `apiKeyEnv`，多 profile 共用一份密钥。
 - **绑定凭据持久化**：扫码后三个 `QZHULI_*` 键写入同一 credentials 文件，
