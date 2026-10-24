@@ -39,7 +39,7 @@ dsh-llm `createUserMessage`/`errorChain`）+ MessageSourceMap 声明合并。
 # cordis.patch.yml 或 profile 目录下的 patch 文件
 - name: '/Users/you/myProject/dsh-qzhuli/src/index.ts'
   config:
-    workspacePath: /Users/you/qzhuli-workspace   # 会话工作区，必填
+    workspacePath: /Users/you/Documents/qzhuli-workspace   # 会话工作区，必填；建议与默认工作区同目录（如 ~/Documents 下）
     environment: release                          # release / dev，缺省 release
     agentPreset: standard                         # 缺省 default
     permissionPreset: default                     # 缺省 default
@@ -115,10 +115,15 @@ dsh-llm `createUserMessage`/`errorChain`）+ MessageSourceMap 声明合并。
     - id: qzhuli
       name: '/Users/you/myProject/dsh-qzhuli/src/index.ts'
       config:
-        workspacePath: /Users/you/qzhuli-workspace
+        workspacePath: /Users/you/Documents/qzhuli-workspace
         environment: release
         agentPreset: standard
 ```
+
+**workspacePath 位置**：与宿主默认工作区放同一目录（macOS 上如
+`~/Documents/`），不要直接建在用户主目录根。会话目录名按 workspace 路径派生，
+路径一旦迁移，历史会话需一并迁移（改名 sessions 目录会导致 header cwd 校验失败，
+只能弃旧重建）。
 
 接入实测要点：
 

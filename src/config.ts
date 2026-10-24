@@ -14,7 +14,10 @@ export interface QzhuliModelConfig {
 export interface QzhuliConfig {
   /** release = 生产，dev = 测试。缺省 release。 */
   readonly environment?: 'release' | 'dev'
-  /** 会话工作区绝对路径（必填）。 */
+  /** 会话工作区绝对路径（必填）。
+   * 建议与宿主默认工作区放在同一目录（如 macOS `~/Documents/` 下），
+   * 与默认工作区同级、勿直接建在用户主目录根：会话目录与凭据按 workspace
+   * 路径派生/隔离，路径一旦迁移，历史会话需同步迁移（见 README 接入实测）。 */
   readonly workspacePath: string
   /** 会话 agent 预设名。缺省 'default'（需与宿主 profile 对齐）。 */
   readonly agentPreset?: string
