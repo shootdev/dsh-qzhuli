@@ -1,0 +1,8 @@
+node_modules/
+lib/
+dist/
+coverage/
+*.log
+.DS_Store
+tsconfig.dev.json
+vitest.alias.mjs

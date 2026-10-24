@@ -1,0 +1,56 @@
+{
+  "name": "qzhuli-deepseekharness-plugin",
+  "version": "0.1.0",
+  "description": "Q助理（QZhuli）网关插件 for DeepSeek Harness：把 Q助理手机/电脑端会话接入 Harness Agent（imnut 协议，扫码绑定 + WebSocket 收消息 + HTTP 推消息）",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./gateway": {
+      "types": "./lib/types/gateway/index.d.ts",
+      "default": "./lib/gateway/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=24.9"
+  },
+  "scripts": {
+    "gen:paths": "node scripts/gen-tsconfig-paths.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.dev.json --noEmit",
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=0.2.0",
+    "@deepseek-ai/dsh-agent": ">=0.2.0",
+    "@deepseek-ai/dsh-agent-default-model": ">=0.2.0",
+    "@deepseek-ai/dsh-agent-preset-registry": ">=0.2.0",
+    "@deepseek-ai/dsh-brand": ">=0.2.0",
+    "@deepseek-ai/dsh-credentials": ">=0.2.0",
+    "@deepseek-ai/dsh-llm": ">=0.2.0",
+    "@deepseek-ai/dsh-permission-presets": ">=0.2.0",
+    "@deepseek-ai/dsh-session": ">=0.2.0",
+    "@deepseek-ai/dsh-session-persistence": ">=0.2.0",
+    "@deepseek-ai/dsh-session-query": ">=0.2.0",
+    "@deepseek-ai/dsh-session-title": ">=0.2.0",
+    "@deepseek-ai/dsh-workspace": ">=0.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^6.0.3",
+    "vitest": "^3.0.0"
+  }
+}

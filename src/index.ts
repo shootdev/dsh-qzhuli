@@ -1,0 +1,164 @@
+/**
+ * Q助理网关插件入口：装配协议层（src/gateway）与 Harness 适配层（src/bridge）。
+ *
+ * 依赖面（运行时 import）：
+ *   - @deepseek-ai/cordis（Context）、@deepseek-ai/dsh-brand（brandString）
+ *   - @deepseek-ai/dsh-credentials（credentialRef）、@deepseek-ai/dsh-llm（createUserMessage/errorChain）
+ * 其余均为类型级依赖（声明合并/仅类型）。
+ */
+
+import type { Context } from '@deepseek-ai/cordis'
+import { credentialRef } from '@deepseek-ai/dsh-credentials'
+import type {} from '@deepseek-ai/dsh-credentials'
+import { createUserMessage, errorChain } from '@deepseek-ai/dsh-llm'
+import type {} from '@deepseek-ai/dsh-agent'
+import type {} from '@deepseek-ai/dsh-agent-default-model'
+import type {} from '@deepseek-ai/dsh-agent-preset-registry'
+import type {} from '@deepseek-ai/dsh-permission-presets'
+import type {} from '@deepseek-ai/dsh-session-persistence'
+import type {} from '@deepseek-ai/dsh-session-query'
+import type {} from '@deepseek-ai/dsh-session-title'
+import type {} from '@deepseek-ai/dsh-workspace'
+import { validateConfig, type QzhuliConfig } from './config.ts'
+import { QzhuliGateway } from './gateway/gateway.ts'
+import type { BoundSession, InboundMessage } from './gateway/port.ts'
+import { disposeOwnedAgents, ensureAgent, sessionIdForConv } from './bridge/sessions.ts'
+import { currentSeq, readLastAssistantReply } from './bridge/reply.ts'
+import type {} from './bridge/source.ts'
+
+export const name = 'qzhuli'
+
+export const inject = [
+  'agents',
+  'agentDefaultModel',
+  'agentPresets',
+  'permissionPresets',
+  'sessionTitle',
+  'sessionQuery',
+  'workspaceRegistry',
+  'credentials',
+  'sessionPersistence',
+] as const
+
+/** 绑定/密钥相关环境变量名（经 Harness credentials 子系统解析）。 */
+const ENV_SENDER_CID = 'QZHULI_SENDER_CID'
+const ENV_CONV_ID = 'QZHULI_CONV_ID'
+const ENV_WS_TOKEN = 'QZHULI_WS_TOKEN'
+const ENV_OPENCLAW_TOKEN = 'QZHULI_OPENCLAW_TOKEN'
+
+export function apply(ctx: Context, config: unknown): void {
+  const cfg = validateConfig(config)
+
+  const gateway = new QzhuliGateway({
+    environment: cfg.environment ?? 'release',
+    ...(cfg.bindKey ? { bindKey: cfg.bindKey } : {}),
+    resolveSession: () => resolveBoundSession(ctx),
+    resolveOpenClawToken: async () => (await ctx.credentials.resolve(credentialRef(ENV_OPENCLAW_TOKEN)))?.value,
+    onStatus: (status) => {
+      ctx.logger.info(
+        `qzhuli: bind=${status.bindStatus} connected=${status.connected}${status.error ? ` error=${status.error}` : ''}`,
+      )
+    },
+  })
+  gateway.onBound((session) => {
+    void persistBoundSession(ctx, session)
+  })
+  gateway.onInbound((msg) => {
+    enqueue(ctx, gateway, cfg, msg)
+  })
+
+  ctx.effect(() => async () => {
+    await gateway.stop()
+    await disposeOwnedAgents()
+  })
+
+  void gateway.start().catch((error: unknown) => {
+    ctx.logger.error(`qzhuli: gateway start failed: ${errorChain(error)}`)
+  })
+}
+
+/** 每会话串行队列：避免 followup 回合交错。 */
+const queues = new Map<string, Promise<void>>()
+
+function enqueue(ctx: Context, gateway: QzhuliGateway, cfg: QzhuliConfig, msg: InboundMessage): void {
+  const previous = queues.get(msg.convId) ?? Promise.resolve()
+  const next = previous
+    .then(() => processMessage(ctx, gateway, cfg, msg))
+    .catch((error: unknown) => {
+      ctx.logger.warn(`qzhuli: conv ${msg.convId} turn failed: ${errorChain(error)}`)
+    })
+  queues.set(msg.convId, next)
+  void next.finally(() => {
+    if (queues.get(msg.convId) === next) queues.delete(msg.convId)
+  })
+}
+
+async function processMessage(
+  ctx: Context,
+  gateway: QzhuliGateway,
+  cfg: QzhuliConfig,
+  msg: InboundMessage,
+): Promise<void> {
+  if (msg.msgType !== 1) {
+    ctx.logger.info(`qzhuli: ignore non-text message msg_type=${msg.msgType} conv=${msg.convId}`)
+    return
+  }
+  const bound = await resolveBoundSession(ctx)
+  if (bound && bound.convId !== msg.convId) {
+    ctx.logger.warn(`qzhuli: ignore message from non-bound conv ${msg.convId}`)
+    return
+  }
+  if (cfg.allowedUsers?.length && !cfg.allowedUsers.includes(msg.senderCid)) {
+    ctx.logger.warn(`qzhuli: ignore message from non-allowed sender ${msg.senderCid}`)
+    return
+  }
+
+  const content = msg.content.slice(0, cfg.maxMessageLength ?? 2000)
+  const sessionId = sessionIdForConv(msg.convId)
+  const agent = await ensureAgent(ctx, msg.convId, cfg)
+  const before = await currentSeq(ctx, sessionId)
+  const userMessage = createUserMessage({
+    content: [{ type: 'text', text: content }],
+    source: { kind: 'qzhuli', convId: msg.convId, senderCid: msg.senderCid, messageId: msg.messageId },
+  })
+  agent.followup(userMessage)
+  await agent.whenIdle()
+
+  const reply = await readLastAssistantReply(ctx, sessionId, before)
+  const text = reply.text.trim()
+  if (text) {
+    const result = await gateway.send(msg.convId, text)
+    if (!result.success) {
+      ctx.logger.warn(`qzhuli: push failed: ${result.error ?? 'unknown'}`)
+    }
+  } else if (reply.interrupted) {
+    ctx.logger.info(`qzhuli: conv ${msg.convId} reply empty after interruption`)
+  }
+}
+
+/** 解析已绑定凭据（每次连接/入站现解析，支持热更新）。 */
+async function resolveBoundSession(ctx: Context): Promise<BoundSession | undefined> {
+  const [senderCid, convId, wsToken] = await Promise.all([
+    ctx.credentials.resolve(credentialRef(ENV_SENDER_CID)),
+    ctx.credentials.resolve(credentialRef(ENV_CONV_ID)),
+    ctx.credentials.resolve(credentialRef(ENV_WS_TOKEN)),
+  ])
+  if (senderCid && convId && wsToken) {
+    return { convId: convId.value, senderCid: senderCid.value, wsToken: wsToken.value }
+  }
+  return undefined
+}
+
+/** 绑定成功后把凭据写入 Harness credentials（幂等），重启免扫码。 */
+async function persistBoundSession(ctx: Context, session: BoundSession): Promise<void> {
+  try {
+    await Promise.all([
+      ctx.credentials.set(credentialRef(ENV_SENDER_CID), session.senderCid),
+      ctx.credentials.set(credentialRef(ENV_CONV_ID), session.convId),
+      ctx.credentials.set(credentialRef(ENV_WS_TOKEN), session.wsToken),
+    ])
+    ctx.logger.info(`qzhuli: bound session persisted conv=${session.convId}`)
+  } catch (error: unknown) {
+    ctx.logger.warn(`qzhuli: persist bound session failed: ${errorChain(error)}`)
+  }
+}
