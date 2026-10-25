@@ -62,8 +62,11 @@ export function apply(ctx: Context, config: unknown): void {
   }
 
   let gateway: QzhuliGateway | undefined
+  let lastConnected = false
 
   ctx.effect(() => async () => {
+    // 关闭前先通知 Q助理（HTTP 推送，不依赖 WS；未绑定/失败静默容忍）。
+    await notifyGatewayState(ctx, gateway, '网关即将关闭')
     await gateway?.stop()
     await disposeOwnedAgents()
   })
@@ -76,6 +79,13 @@ export function apply(ctx: Context, config: unknown): void {
       resolveSession: () => resolveBoundSession(ctx),
       resolveOpenClawToken: async () => (await ctx.credentials.resolve(credentialRef(ENV_OPENCLAW_TOKEN)))?.value,
       onStatus: (status) => {
+        // WS（重）连接成功：向 Q助理发一条「已开启」通知（只在该边沿触发一次）。
+        if (status.connected && !lastConnected) {
+          lastConnected = true
+          void notifyGatewayState(ctx, gateway, '网关已开启')
+        } else if (!status.connected) {
+          lastConnected = false
+        }
         ctx.logger.info(
           `qzhuli: bind=${status.bindStatus} connected=${status.connected}${status.error ? ` error=${status.error}` : ''}`,
         )
@@ -190,6 +200,21 @@ async function resolveBoundSession(ctx: Context): Promise<BoundSession | undefin
     return { convId: convId.value, senderCid: senderCid.value, wsToken: wsToken.value }
   }
   return undefined
+}
+
+/** 向绑定会话推送一条网关状态通知（未绑定/未启动/推送失败一律静默容忍）。 */
+async function notifyGatewayState(ctx: Context, gateway: QzhuliGateway | undefined, text: string): Promise<void> {
+  if (!gateway) return
+  const bound = await resolveBoundSession(ctx)
+  if (!bound) return
+  try {
+    const result = await gateway.send(bound.convId, text)
+    if (!result.success) {
+      ctx.logger.warn(`qzhuli: status notify failed: ${result.error ?? 'unknown'}`)
+    }
+  } catch (error: unknown) {
+    ctx.logger.warn(`qzhuli: status notify error: ${errorChain(error)}`)
+  }
 }
 
 /** 绑定成功后把凭据写入 Harness credentials（幂等），重启免扫码。 */
