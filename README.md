@@ -239,6 +239,34 @@ corepack pnpm build:client                        # 构建浏览器端 bundle �
 
 `HARNESS_REPO` 环境变量可覆盖 Harness 仓库路径（默认 `../deepseek-harness`）。
 
+## 开机自启与守护（macOS launchd）
+
+独立网关用 launchd 守护，登录自动启动、崩溃自动拉起（KeepAlive）。配置了两处：
+
+1. **包装 App**（决定「系统设置 → 通用 → 登录项 → 允许在后台」的显示名）：
+   `~/Library/Application Support/QZhuliGW/Q助理-DeepSeek harness连接组件.app`
+   —— 内含 Info.plist（CFBundleName=「Q助理-DeepSeek harness连接组件」）与 `Contents/MacOS/`
+   同名可执行脚本（`export PATH/HOME` → `cd harness` → `exec node --import tsx/loader.mjs
+   apps/cli/src/bin.ts --profile qzhuli`）。
+   > macOS 后台项显示名跟随**主程序二进制名**（node 自带显示 "Node.js Foundation"），
+   > 与 launchd Label 无关；因此用包装 App + 中文可执行文件名来控制显示名。
+
+2. **LaunchAgent**：`~/Library/LaunchAgents/Q助理-DeepSeek harness连接组件.plist`
+   （`RunAtLoad` + `KeepAlive`，ProgramArguments 指向包装 App 的可执行脚本；
+   日志 stdout=/tmp/qzhuli-gw.log、stderr=/tmp/qzhuli-gw.err.log）。
+
+管理命令：
+
+```bash
+launchctl print gui/501/"Q助理-DeepSeek harness连接组件"                        # 状态
+launchctl bootout gui/501/"Q助理-DeepSeek harness连接组件"                       # 停止
+launchctl bootstrap gui/501 ~/Library/LaunchAgents/Q助理-DeepSeek\ harness连接组件.plist  # 启动
+```
+
+生命周期通知：网关 WS 每（重）连成功向绑定会话推送「网关已开启」；进程优雅关闭前
+（SIGTERM/SIGINT，经 harness 的 5s dispose 窗口）推送「网关即将关闭」。HTTP 推送
+不依赖 WS，未绑定/失败静默容忍。崩溃（如 kill -9）无法触发关闭通知，属预期。
+
 ## 已知限制与风险
 
 - **pre-stable API**：Harness 公共 API 现标 pre-stable，插件做不到「永不改动」；设计把改动面
